@@ -60,10 +60,9 @@ type FiltersConfig struct {
 
 // FilterGlobalConfig applies to all filters in the pipeline.
 type FilterGlobalConfig struct {
-	MaxLines       int    `toml:"max_lines"`        // 0 = unlimited
-	MaxLineLength  int    `toml:"max_line_length"`  // 0 = unlimited
-	MaxOutputBytes int    `toml:"max_output_bytes"` // 0 = unlimited
-	StreamMode     string `toml:"stream_mode"`      // "filter" | "full"
+	MaxLines       int `toml:"max_lines"`        // 0 = unlimited
+	MaxLineLength  int `toml:"max_line_length"`  // 0 = unlimited
+	MaxOutputBytes int `toml:"max_output_bytes"` // 0 = unlimited
 }
 
 // FilterOverride overrides specific pipeline action parameters for a named filter.
@@ -458,7 +457,7 @@ func LoadMerged() (*Config, error) {
 			merged.Filters.Enable[k] = v
 		}
 		// Global limits: project wins entirely
-		if project.Filters.Global.MaxLines > 0 || project.Filters.Global.MaxLineLength > 0 || project.Filters.Global.MaxOutputBytes > 0 || project.Filters.Global.StreamMode != "" {
+		if project.Filters.Global != (FilterGlobalConfig{}) {
 			merged.Filters.Global = project.Filters.Global
 		}
 		// Per-filter overrides: project wins
