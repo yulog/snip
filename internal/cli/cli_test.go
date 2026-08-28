@@ -22,6 +22,30 @@ func captureStderr(fn func()) string {
 	return buf.String()
 }
 
+// captureStdout captures stdout during fn execution and returns the captured output.
+func captureStdout(fn func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	return buf.String()
+}
+
+// TestUsageDocumentsInitFlags guards against init flags implemented in
+// initcmd but missing from the help text (issue #162).
+func TestUsageDocumentsInitFlags(t *testing.T) {
+	out := captureStdout(printUsage)
+	for _, flag := range []string{"--agent", "--mode", "--uninstall"} {
+		if !strings.Contains(out, flag) {
+			t.Errorf("printUsage does not document init flag %s", flag)
+		}
+	}
+}
+
 func TestUnproxyableCommands(t *testing.T) {
 	tests := []struct {
 		command string
