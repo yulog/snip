@@ -139,34 +139,7 @@ func Run(args []string) int {
 		return 0
 
 	case "config":
-		cfg, err := config.Load()
-		if err != nil {
-			display.PrintError(err.Error())
-			return 1
-		}
-		fmt.Printf("tracking.db_path: %s\n", cfg.Tracking.DBPath)
-		fmt.Printf("tracking.track_unfiltered: %v\n", cfg.Tracking.TrackUnfiltered)
-		fmt.Printf("filters.dir: %s\n", strings.Join(cfg.Filters.Dirs(), ", "))
-		fmt.Printf("tee.mode: %s\n", cfg.Tee.Mode)
-		fmt.Printf("tee.max_files: %d\n", cfg.Tee.MaxFiles)
-		fmt.Printf("tee.project_marker: %s\n", cfg.Tee.ProjectMarker)
-		fmt.Printf("display.color: %v\n", cfg.Display.Color)
-		fmt.Printf("display.emoji: %v\n", cfg.Display.Emoji)
-		fmt.Printf("display.quiet_no_filter: %v\n", cfg.Display.QuietNoFilter)
-		fmt.Printf("display.summary: %v\n", cfg.Display.Summary)
-		if len(cfg.Filters.Enable) == 0 {
-			fmt.Println("filters.enable: (all enabled)")
-		} else {
-			names := make([]string, 0, len(cfg.Filters.Enable))
-			for k := range cfg.Filters.Enable {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-			for _, name := range names {
-				fmt.Printf("filters.enable.%s: %v\n", name, cfg.Filters.Enable[name])
-			}
-		}
-		return 0
+		return runConfigCmd()
 
 	case "discover":
 		if err := discover.Run(cmdArgs); err != nil {
@@ -479,6 +452,108 @@ func isFilterEnabled(cfg *config.Config, name string) bool {
 		return true
 	}
 	return enabled
+}
+
+// runConfigCmd prints the effective merged configuration (plugin < user <
+// project) and labels where each layer came from (issue #161).
+func runConfigCmd() int {
+	cfg, sources, err := config.LoadMergedWithSources()
+	if err != nil {
+		display.PrintError(err.Error())
+		return 1
+	}
+
+	fmt.Println("sources:")
+	if len(sources) == 0 {
+		fmt.Println("  (built-in defaults only)")
+	}
+	for _, s := range sources {
+		status := "applied"
+		if !s.Applied {
+			status = "ignored: " + s.Reason
+		}
+		fmt.Printf("  %s: %s (%s)\n", s.Layer, s.Path, status)
+	}
+	fmt.Println()
+
+	mode := cfg.Mode
+	if mode == "" {
+		mode = "user"
+	}
+	fmt.Printf("mode: %s\n", mode)
+	fmt.Printf("tracking.db_path: %s\n", cfg.Tracking.DBPath)
+	fmt.Printf("tracking.track_unfiltered: %v\n", cfg.Tracking.TrackUnfiltered)
+	fmt.Printf("display.color: %v\n", cfg.Display.Color)
+	fmt.Printf("display.emoji: %v\n", cfg.Display.Emoji)
+	fmt.Printf("display.quiet_no_filter: %v\n", cfg.Display.QuietNoFilter)
+	fmt.Printf("display.summary: %v\n", cfg.Display.Summary)
+	fmt.Printf("filters.dir: %s\n", strings.Join(cfg.Filters.Dirs(), ", "))
+	if len(cfg.Filters.Enable) == 0 {
+		fmt.Println("filters.enable: (all enabled)")
+	} else {
+		names := make([]string, 0, len(cfg.Filters.Enable))
+		for k := range cfg.Filters.Enable {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf("filters.enable.%s: %v\n", name, cfg.Filters.Enable[name])
+		}
+	}
+	fmt.Printf("filters.global.max_lines: %d\n", cfg.Filters.Global.MaxLines)
+	fmt.Printf("filters.global.max_line_length: %d\n", cfg.Filters.Global.MaxLineLength)
+	fmt.Printf("filters.global.max_output_bytes: %d\n", cfg.Filters.Global.MaxOutputBytes)
+	if len(cfg.Filters.Override) > 0 {
+		names := make([]string, 0, len(cfg.Filters.Override))
+		for k := range cfg.Filters.Override {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf("filters.override.%s: %s\n", name, overrideSummary(cfg.Filters.Override[name]))
+		}
+	}
+	fmt.Printf("filters.bypass.commands: %s\n", listOrNone(cfg.Filters.Bypass.Commands))
+	fmt.Printf("filters.transparent_prefixes: %s\n", listOrNone(cfg.Filters.TransparentPrefixes))
+	fmt.Printf("tee.enabled: %v\n", cfg.Tee.Enabled)
+	fmt.Printf("tee.mode: %s\n", cfg.Tee.Mode)
+	fmt.Printf("tee.max_files: %d\n", cfg.Tee.MaxFiles)
+	fmt.Printf("tee.max_file_size: %d\n", cfg.Tee.MaxFileSize)
+	fmt.Printf("tee.project_marker: %s\n", cfg.Tee.ProjectMarker)
+	return 0
+}
+
+// overrideSummary renders the non-zero fields of a filter override as
+// "key=value" pairs, in the field order of the TOML section.
+func overrideSummary(o config.FilterOverride) string {
+	var parts []string
+	if o.Head > 0 {
+		parts = append(parts, fmt.Sprintf("head=%d", o.Head))
+	}
+	if o.Tail > 0 {
+		parts = append(parts, fmt.Sprintf("tail=%d", o.Tail))
+	}
+	if o.TruncateLines > 0 {
+		parts = append(parts, fmt.Sprintf("truncate_lines=%d", o.TruncateLines))
+	}
+	if o.KeepLines != "" {
+		parts = append(parts, "keep_lines="+o.KeepLines)
+	}
+	if o.RemoveLines != "" {
+		parts = append(parts, "remove_lines="+o.RemoveLines)
+	}
+	if o.StreamMode != "" {
+		parts = append(parts, "stream_mode="+o.StreamMode)
+	}
+	return strings.Join(parts, " ")
+}
+
+// listOrNone joins values with commas, or "(none)" for an empty list.
+func listOrNone(values []string) string {
+	if len(values) == 0 {
+		return "(none)"
+	}
+	return strings.Join(values, ", ")
 }
 
 func printUsage() {

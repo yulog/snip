@@ -1729,3 +1729,146 @@ opus = 4.20
 		t.Errorf("Tiers[opus] after array-dir fallback: got %v, want 4.20", cfg.Economics.Tiers["opus"])
 	}
 }
+
+// sourceByLayer returns the Source entry for the given layer, or nil.
+func sourceByLayer(sources []Source, layer string) *Source {
+	for i := range sources {
+		if sources[i].Layer == layer {
+			return &sources[i]
+		}
+	}
+	return nil
+}
+
+func TestLoadMergedWithSourcesTrustedProject(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(home, ".config", "snip", "config.toml")
+	if err := os.WriteFile(userPath, []byte("[filters.global]\nmax_lines = 100\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := canonicalTempDir(t)
+	if err := os.MkdirAll(filepath.Join(projectDir, ".snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfgPath := filepath.Join(projectDir, ".snip", "config.toml")
+	if err := os.WriteFile(projectCfgPath, []byte("mode = \"project\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := make(trust.Store)
+	hash, err := trust.HashFile(projectCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store[projectCfgPath] = hash
+	if err := trust.SaveTo(store, filepath.Join(home, ".config", "snip", "trusted.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("SNIP_CONFIG", userPath)
+	t.Setenv("SNIP_PLUGIN_CONFIG", "")
+	oldWd, _ := os.Getwd()
+	_ = os.Chdir(projectDir)
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	cfg, sources, err := LoadMergedWithSources()
+	if err != nil {
+		t.Fatalf("LoadMergedWithSources: %v", err)
+	}
+	if cfg.Mode != "project" {
+		t.Errorf("mode = %q, want project", cfg.Mode)
+	}
+
+	user := sourceByLayer(sources, "user")
+	if user == nil || !user.Applied || user.Path != userPath {
+		t.Errorf("user source = %+v, want applied at %s", user, userPath)
+	}
+	project := sourceByLayer(sources, "project")
+	if project == nil || !project.Applied || project.Path != projectCfgPath {
+		t.Errorf("project source = %+v, want applied at %s", project, projectCfgPath)
+	}
+	if plugin := sourceByLayer(sources, "plugin"); plugin != nil {
+		t.Errorf("plugin source = %+v, want none", plugin)
+	}
+}
+
+func TestLoadMergedWithSourcesUntrustedProject(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(home, ".config", "snip", "config.toml")
+
+	projectDir := canonicalTempDir(t)
+	if err := os.MkdirAll(filepath.Join(projectDir, ".snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfgPath := filepath.Join(projectDir, ".snip", "config.toml")
+	if err := os.WriteFile(projectCfgPath, []byte("mode = \"project\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("SNIP_CONFIG", userPath)
+	t.Setenv("SNIP_PLUGIN_CONFIG", "")
+	oldWd, _ := os.Getwd()
+	_ = os.Chdir(projectDir)
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	cfg, sources, err := LoadMergedWithSources()
+	if err != nil {
+		t.Fatalf("LoadMergedWithSources: %v", err)
+	}
+	if cfg.Mode == "project" {
+		t.Error("untrusted project config must not apply")
+	}
+
+	user := sourceByLayer(sources, "user")
+	if user == nil || user.Applied {
+		t.Errorf("user source = %+v, want present and not applied (missing file)", user)
+	}
+	project := sourceByLayer(sources, "project")
+	if project == nil || project.Applied || !strings.Contains(project.Reason, "untrusted") {
+		t.Errorf("project source = %+v, want skipped as untrusted", project)
+	}
+}
+
+func TestLoadMergedWithSourcesPluginLayer(t *testing.T) {
+	pluginPath, _ := pluginTestSetup(t, "[filters.enable]\ngit-diff = false\n", true)
+
+	cfg, sources, err := LoadMergedWithSources()
+	if err != nil {
+		t.Fatalf("LoadMergedWithSources: %v", err)
+	}
+	if cfg.Filters.Enable["git-diff"] != false {
+		t.Error("plugin layer should disable git-diff")
+	}
+
+	plugin := sourceByLayer(sources, "plugin")
+	if plugin == nil || !plugin.Applied || plugin.Path != pluginPath {
+		t.Errorf("plugin source = %+v, want applied at %s", plugin, pluginPath)
+	}
+}
+
+func TestLoadMergedWithSourcesUntrustedPlugin(t *testing.T) {
+	pluginPath, _ := pluginTestSetup(t, "[filters.enable]\ngit-diff = false\n", false)
+
+	cfg, sources, err := LoadMergedWithSources()
+	if err != nil {
+		t.Fatalf("LoadMergedWithSources: %v", err)
+	}
+	if _, ok := cfg.Filters.Enable["git-diff"]; ok {
+		t.Error("untrusted plugin layer must not apply")
+	}
+
+	plugin := sourceByLayer(sources, "plugin")
+	if plugin == nil || plugin.Applied || !strings.Contains(plugin.Reason, "untrusted") {
+		t.Errorf("plugin source = %+v, want skipped as untrusted at %s", plugin, pluginPath)
+	}
+}
