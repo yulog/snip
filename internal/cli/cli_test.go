@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/edouard-claude/snip/internal/trust"
 )
 
 // captureStderr captures stderr during fn execution and returns the captured output.
@@ -964,5 +966,97 @@ func TestRunCommandHelpAfterSeparator(t *testing.T) {
 	code := Run([]string{"snip", "run", "--", "git", "--help"})
 	if code != 0 {
 		t.Errorf("Run(run -- git --help) = %d, want 0", code)
+	}
+}
+
+// TestConfigShowsMergedConfig verifies that `snip config` prints the
+// effective merged configuration with its layer sources (issue #161).
+func TestConfigShowsMergedConfig(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "snip", "filters"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(home, ".config", "snip", "config.toml")
+	userContent := `[filters]
+transparent_prefixes = ["poetry run"]
+
+[filters.global]
+max_lines = 100
+`
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, ".snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfgPath := filepath.Join(projectDir, ".snip", "config.toml")
+	projectContent := `mode = "project"
+
+[filters.global]
+max_lines = 50
+
+[filters.override.pyright]
+stream_mode = "full"
+
+[filters.bypass]
+commands = ["terraform"]
+`
+	if err := os.WriteFile(projectCfgPath, []byte(projectContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := make(trust.Store)
+	hash, err := trust.HashFile(projectCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store[projectCfgPath] = hash
+	if err := trust.SaveTo(store, filepath.Join(home, ".config", "snip", "trusted.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("SNIP_CONFIG", userPath)
+	t.Setenv("SNIP_PLUGIN_CONFIG", "")
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	var buf bytes.Buffer
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := Run([]string{"snip", "config"})
+	_ = w.Close()
+	os.Stdout = old
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("ReadFrom: %v", err)
+	}
+	out := buf.String()
+
+	if code != 0 {
+		t.Fatalf("Run(config) = %d, want 0", code)
+	}
+	for _, want := range []string{
+		"mode: project",
+		"filters.global.max_lines: 50",
+		"filters.override.pyright: stream_mode=full",
+		"filters.bypass.commands: terraform",
+		"filters.transparent_prefixes: poetry run",
+		"tee.enabled: true",
+		"tee.max_file_size: 1048576",
+		"user: " + userPath,
+		"project: " + projectCfgPath,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\noutput:\n%s", want, out)
+		}
 	}
 }

@@ -307,33 +307,39 @@ func LoadWithPlugin() (*Config, error) {
 
 // applyPluginLayer merges the SNIP_PLUGIN_CONFIG file underneath the user
 // config in place. The user's explicit settings win over the plugin's.
-func applyPluginLayer(user *Config) {
+// Returns the layer's Source, or nil when no plugin layer is declared.
+func applyPluginLayer(user *Config) *Source {
 	path := pluginConfigPath()
 	if path == "" {
-		return
+		return nil
 	}
+	src := &Source{Layer: "plugin", Path: path}
 
 	store, err := trust.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "snip: ignoring untrusted plugin config %s (trust store unreadable: %v)\n", path, err)
-		return
+		src.Reason = "untrusted (trust store unreadable)"
+		return src
 	}
 	if !trust.IsTrusted(store, path) {
 		fmt.Fprintf(os.Stderr, "snip: ignoring untrusted plugin config %s (run 'snip trust %s' to trust)\n", path, path)
-		return
+		src.Reason = fmt.Sprintf("untrusted, run 'snip trust %s'", path)
+		return src
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "snip: ignoring unreadable plugin config %s: %v\n", path, err)
-		return
+		src.Reason = "unreadable"
+		return src
 	}
 	plugin := DefaultConfig()
 	if err := toml.Unmarshal(data, plugin); err != nil {
 		plugin = DefaultConfig()
 		if !tryUnmarshalArrayDir(data, plugin) {
 			fmt.Fprintf(os.Stderr, "snip: ignoring invalid plugin config %s: %v\n", path, err)
-			return
+			src.Reason = "invalid TOML"
+			return src
 		}
 	}
 	plugin.expandPaths()
@@ -397,6 +403,18 @@ func applyPluginLayer(user *Config) {
 		}
 	}
 	user.Filters.Dir = dirs
+
+	src.Applied = true
+	return src
+}
+
+// Source describes one configuration layer considered by LoadMerged and
+// whether it made it into the effective config.
+type Source struct {
+	Layer   string // "plugin", "user" or "project"
+	Path    string
+	Applied bool
+	Reason  string // why the layer was skipped; empty when applied
 }
 
 // LoadMerged loads the user config (with the plugin layer underneath, see
@@ -405,21 +423,43 @@ func applyPluginLayer(user *Config) {
 // config's filter settings override the user's. When mode == "user"
 // (default), user settings take priority.
 func LoadMerged() (*Config, error) {
-	user, err := LoadWithPlugin()
+	cfg, _, err := LoadMergedWithSources()
+	return cfg, err
+}
+
+// LoadMergedWithSources is LoadMerged keeping per-layer provenance, so
+// `snip config` can label where each effective setting comes from (#161).
+// Sources are listed in precedence order: plugin < user < project.
+func LoadMergedWithSources() (*Config, []Source, error) {
+	user, err := Load()
 	if err != nil {
 		// If user config file is missing, use defaults (normal for new installs).
 		// Other errors (permission, corrupt TOML) propagate to the caller so the
 		// user knows something is wrong with their config.
 		if os.IsNotExist(err) {
-			return DefaultConfig(), nil
+			return DefaultConfig(), nil, nil
 		}
-		return nil, fmt.Errorf("load user config: %w", err)
+		return nil, nil, fmt.Errorf("load user config: %w", err)
 	}
+
+	var sources []Source
+	if src := applyPluginLayer(user); src != nil {
+		sources = append(sources, *src)
+	}
+
+	userSrc := Source{Layer: "user", Path: configPath()}
+	if _, statErr := os.Stat(userSrc.Path); statErr == nil {
+		userSrc.Applied = true
+	} else {
+		userSrc.Reason = "not found (defaults apply)"
+	}
+	sources = append(sources, userSrc)
 
 	projectPath := projectConfigPath()
 	if projectPath == "" {
-		return user, nil // no project config — user only
+		return user, sources, nil // no project config — user only
 	}
+	projSrc := Source{Layer: "project", Path: projectPath}
 
 	// Trust gate: project configs must be explicitly trusted via `snip trust`.
 	// Without this guard, any cloned repo could ship a .snip/config.toml that
@@ -427,21 +467,30 @@ func LoadMerged() (*Config, error) {
 	store, err := trust.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "snip: ignoring untrusted project config %s (trust store unreadable: %v)\n", projectPath, err)
-		return user, nil // no trust store = no project configs trusted
+		projSrc.Reason = "untrusted (trust store unreadable)"
+		return user, append(sources, projSrc), nil // no trust store = no project configs trusted
 	}
 	if !trust.IsTrusted(store, projectPath) {
 		fmt.Fprintf(os.Stderr, "snip: ignoring untrusted project config %s (run 'snip trust %s' to trust)\n", projectPath, projectPath)
-		return user, nil // untrusted: fall back to user config only
+		projSrc.Reason = fmt.Sprintf("untrusted, run 'snip trust %s'", projectPath)
+		return user, append(sources, projSrc), nil // untrusted: fall back to user config only
 	}
 
 	project := DefaultConfig()
 	data, err := os.ReadFile(projectPath)
 	if err != nil {
-		return user, nil
+		projSrc.Reason = "unreadable"
+		return user, append(sources, projSrc), nil
 	}
 	if err := toml.Unmarshal(data, project); err != nil {
-		return nil, fmt.Errorf("parse project config %s: %w", projectPath, err)
+		// Degrade like the plugin layer does: keep the user config running and
+		// report the broken layer instead of failing the whole load.
+		fmt.Fprintf(os.Stderr, "snip: ignoring invalid project config %s: %v\n", projectPath, err)
+		projSrc.Reason = "invalid TOML"
+		return user, append(sources, projSrc), nil
 	}
+	projSrc.Applied = true
+	sources = append(sources, projSrc)
 
 	// Default mode is "user" — developer's personal config wins conflicts
 	merged := user
@@ -477,7 +526,7 @@ func LoadMerged() (*Config, error) {
 	merged.Filters.Bypass.Commands = append(merged.Filters.Bypass.Commands,
 		project.Filters.Bypass.Commands...)
 
-	return merged, nil
+	return merged, sources, nil
 }
 
 func configPath() string {
