@@ -526,6 +526,12 @@ func LoadMergedWithSources() (*Config, []Source, error) {
 	merged.Filters.Bypass.Commands = append(merged.Filters.Bypass.Commands,
 		project.Filters.Bypass.Commands...)
 
+	// Transparent prefixes accumulate from both sides too (issue #178); the
+	// plugin layer already merged its own into user's.
+	merged.Filters.TransparentPrefixes = append([]string{}, user.Filters.TransparentPrefixes...)
+	merged.Filters.TransparentPrefixes = append(merged.Filters.TransparentPrefixes,
+		project.Filters.TransparentPrefixes...)
+
 	return merged, sources, nil
 }
 
