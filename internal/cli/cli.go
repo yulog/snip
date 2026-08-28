@@ -514,12 +514,30 @@ func runConfigCmd() int {
 		}
 	}
 	fmt.Printf("filters.bypass.commands: %s\n", listOrNone(cfg.Filters.Bypass.Commands))
-	fmt.Printf("filters.transparent_prefixes: %s\n", listOrNone(cfg.Filters.TransparentPrefixes))
+	// Built-in prefixes (uv run, poetry run, ...) always apply on top of the
+	// configured ones, so "(none)" alone would misstate effective behavior.
+	if len(cfg.Filters.TransparentPrefixes) == 0 {
+		fmt.Println("filters.transparent_prefixes: (none configured; built-ins always apply)")
+	} else {
+		fmt.Printf("filters.transparent_prefixes: %s (+ built-ins)\n", strings.Join(cfg.Filters.TransparentPrefixes, ", "))
+	}
 	fmt.Printf("tee.enabled: %v\n", cfg.Tee.Enabled)
 	fmt.Printf("tee.mode: %s\n", cfg.Tee.Mode)
 	fmt.Printf("tee.max_files: %d\n", cfg.Tee.MaxFiles)
 	fmt.Printf("tee.max_file_size: %d\n", cfg.Tee.MaxFileSize)
 	fmt.Printf("tee.project_marker: %s\n", cfg.Tee.ProjectMarker)
+	if len(cfg.Economics.Tiers) == 0 {
+		fmt.Println("economics.tiers: (built-in defaults)")
+	} else {
+		names := make([]string, 0, len(cfg.Economics.Tiers))
+		for k := range cfg.Economics.Tiers {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf("economics.tiers.%s: %g\n", name, cfg.Economics.Tiers[name])
+		}
+	}
 	return 0
 }
 
@@ -536,14 +554,19 @@ func overrideSummary(o config.FilterOverride) string {
 	if o.TruncateLines > 0 {
 		parts = append(parts, fmt.Sprintf("truncate_lines=%d", o.TruncateLines))
 	}
+	// Regex values may contain spaces; quote them so field boundaries stay
+	// unambiguous.
 	if o.KeepLines != "" {
-		parts = append(parts, "keep_lines="+o.KeepLines)
+		parts = append(parts, fmt.Sprintf("keep_lines=%q", o.KeepLines))
 	}
 	if o.RemoveLines != "" {
-		parts = append(parts, "remove_lines="+o.RemoveLines)
+		parts = append(parts, fmt.Sprintf("remove_lines=%q", o.RemoveLines))
 	}
 	if o.StreamMode != "" {
 		parts = append(parts, "stream_mode="+o.StreamMode)
+	}
+	if len(parts) == 0 {
+		return "(empty)"
 	}
 	return strings.Join(parts, " ")
 }

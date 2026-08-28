@@ -1014,7 +1014,10 @@ func TestLoadMergedMissingTrustStoreReturnsUserOnly(t *testing.T) {
 	}
 }
 
-func TestLoadMergedMalformedTrustedConfigReturnsError(t *testing.T) {
+// A malformed trusted project config degrades to the user config with a
+// stderr warning, like the plugin layer, instead of failing the whole load
+// (snip config must keep printing provenance to point at the broken layer).
+func TestLoadMergedMalformedTrustedConfigDegrades(t *testing.T) {
 	baseDir := canonicalTempDir(t)
 	home := filepath.Join(baseDir, "home")
 	projectDir := filepath.Join(baseDir, "project")
@@ -1057,11 +1060,17 @@ func TestLoadMergedMalformedTrustedConfigReturnsError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	cfg, err := LoadMerged()
-	if err == nil {
-		t.Fatal("expected error for malformed trusted project config")
+	if err != nil {
+		t.Fatalf("malformed project config must degrade, not fail: %v", err)
 	}
-	if cfg != nil {
-		t.Error("expected nil config on malformed project config")
+	if cfg == nil {
+		t.Fatal("expected user config on malformed project config")
+	}
+	if !cfg.Display.QuietNoFilter {
+		t.Error("user config must survive a malformed project layer")
+	}
+	if v, ok := cfg.Filters.Enable["git-diff"]; ok && !v {
+		t.Error("malformed project config must not contribute settings")
 	}
 }
 
@@ -1846,7 +1855,8 @@ func TestLoadMergedWithSourcesPluginLayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadMergedWithSources: %v", err)
 	}
-	if cfg.Filters.Enable["git-diff"] != false {
+	v, ok := cfg.Filters.Enable["git-diff"]
+	if !ok || v {
 		t.Error("plugin layer should disable git-diff")
 	}
 
@@ -1870,5 +1880,54 @@ func TestLoadMergedWithSourcesUntrustedPlugin(t *testing.T) {
 	plugin := sourceByLayer(sources, "plugin")
 	if plugin == nil || plugin.Applied || !strings.Contains(plugin.Reason, "untrusted") {
 		t.Errorf("plugin source = %+v, want skipped as untrusted at %s", plugin, pluginPath)
+	}
+}
+
+func TestLoadMergedWithSourcesInvalidProjectTOML(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(home, ".config", "snip", "config.toml")
+	if err := os.WriteFile(userPath, []byte("[filters.global]\nmax_lines = 100\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := canonicalTempDir(t)
+	if err := os.MkdirAll(filepath.Join(projectDir, ".snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfgPath := filepath.Join(projectDir, ".snip", "config.toml")
+	if err := os.WriteFile(projectCfgPath, []byte("mode = [unclosed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := make(trust.Store)
+	hash, err := trust.HashFile(projectCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store[projectCfgPath] = hash
+	if err := trust.SaveTo(store, filepath.Join(home, ".config", "snip", "trusted.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("SNIP_CONFIG", userPath)
+	t.Setenv("SNIP_PLUGIN_CONFIG", "")
+	oldWd, _ := os.Getwd()
+	_ = os.Chdir(projectDir)
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	cfg, sources, err := LoadMergedWithSources()
+	if err != nil {
+		t.Fatalf("invalid project TOML must degrade, not fail: %v", err)
+	}
+	if cfg.Filters.Global.MaxLines != 100 {
+		t.Errorf("user config must survive a broken project layer, MaxLines = %d", cfg.Filters.Global.MaxLines)
+	}
+	project := sourceByLayer(sources, "project")
+	if project == nil || project.Applied || !strings.Contains(project.Reason, "invalid TOML") {
+		t.Errorf("project source = %+v, want skipped as invalid TOML", project)
 	}
 }

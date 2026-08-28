@@ -483,7 +483,11 @@ func LoadMergedWithSources() (*Config, []Source, error) {
 		return user, append(sources, projSrc), nil
 	}
 	if err := toml.Unmarshal(data, project); err != nil {
-		return nil, nil, fmt.Errorf("parse project config %s: %w", projectPath, err)
+		// Degrade like the plugin layer does: keep the user config running and
+		// report the broken layer instead of failing the whole load.
+		fmt.Fprintf(os.Stderr, "snip: ignoring invalid project config %s: %v\n", projectPath, err)
+		projSrc.Reason = "invalid TOML"
+		return user, append(sources, projSrc), nil
 	}
 	projSrc.Applied = true
 	sources = append(sources, projSrc)
