@@ -512,6 +512,9 @@ Init flags:
   --agent <name>  Agent to configure:
                   claude-code (default), cursor, codex, pi, windsurf, cline,
                   copilot, gemini, kilocode, antigravity, grok
+  --mode <mode>   Integration mode for codex, copilot, grok:
+                  hook (default) or prompt (instructions-file injection
+                  for releases without PreToolUse hook support)
   --uninstall     Remove snip integration for the agent
 
 Flags:
