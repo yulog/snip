@@ -635,7 +635,7 @@ stream_mode = "full"
 }
 
 func TestLoadMergedGlobalOverrideGate(t *testing.T) {
-	// When project config only sets max_line_length (no max_lines, no stream_mode),
+	// When project config only sets max_line_length (no max_lines),
 	// the global override should still apply.
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
