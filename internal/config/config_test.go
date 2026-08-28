@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1929,5 +1930,60 @@ func TestLoadMergedWithSourcesInvalidProjectTOML(t *testing.T) {
 	project := sourceByLayer(sources, "project")
 	if project == nil || project.Applied || !strings.Contains(project.Reason, "invalid TOML") {
 		t.Errorf("project source = %+v, want skipped as invalid TOML", project)
+	}
+}
+
+// TestLoadMergedTransparentPrefixesMerge: transparent_prefixes accumulates
+// from user + project like bypass does, regardless of mode (issue #178).
+func TestLoadMergedTransparentPrefixesMerge(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".config", "snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userPath := filepath.Join(home, ".config", "snip", "config.toml")
+	userContent := `[filters]
+transparent_prefixes = ["poetry run"]
+`
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := canonicalTempDir(t)
+	if err := os.MkdirAll(filepath.Join(projectDir, ".snip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectCfgPath := filepath.Join(projectDir, ".snip", "config.toml")
+	// No mode = "project": the additive list must merge like bypass anyway.
+	projectContent := `[filters]
+transparent_prefixes = ["docker exec app"]
+`
+	if err := os.WriteFile(projectCfgPath, []byte(projectContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := make(trust.Store)
+	hash, err := trust.HashFile(projectCfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store[projectCfgPath] = hash
+	if err := trust.SaveTo(store, filepath.Join(home, ".config", "snip", "trusted.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("SNIP_CONFIG", userPath)
+	t.Setenv("SNIP_PLUGIN_CONFIG", "")
+	oldWd, _ := os.Getwd()
+	_ = os.Chdir(projectDir)
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	cfg, err := LoadMerged()
+	if err != nil {
+		t.Fatalf("LoadMerged: %v", err)
+	}
+	want := []string{"poetry run", "docker exec app"}
+	if !reflect.DeepEqual(cfg.Filters.TransparentPrefixes, want) {
+		t.Errorf("TransparentPrefixes = %v, want %v", cfg.Filters.TransparentPrefixes, want)
 	}
 }
