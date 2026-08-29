@@ -104,3 +104,71 @@ func patchAntigravityHooks(path, hookCommand string) error {
 
 	return os.WriteFile(path, out, 0644)
 }
+
+func unpatchAntigravityHooks(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read hooks: %w", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("parse hooks: %w", err)
+	}
+	snipHooks, _ := settings["snip-hooks"].(map[string]any)
+	if snipHooks == nil {
+		snipHooks = make(map[string]any)
+	}
+
+	existing, ok := snipHooks["PreToolUse"]
+	if !ok {
+		return nil
+	}
+	arr, ok := existing.([]any)
+	if !ok {
+		return nil
+	}
+
+	// Remove snip entries
+	var filtered []any
+	for _, entry := range arr {
+		// TODO: Windows .exe support
+		if !isSnipEntry(entry) {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	if len(filtered) == 0 {
+		delete(snipHooks, "PreToolUse")
+	} else {
+		snipHooks["PreToolUse"] = filtered
+	}
+	// TODO: Remove snip-hooks section
+	if len(snipHooks) == 0 {
+		delete(settings, "snip-hooks")
+	}
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal hooks: %w", err)
+	}
+
+	return os.WriteFile(path, out, 0644)
+}
+
+func uninstallAntigravity() error {
+	agyBase, err := config.AntigravityBaseDir()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+
+	hooksPath := filepath.Join(agyBase, "config", "hooks.json")
+	if err := unpatchAntigravityHooks(hooksPath); err != nil {
+		return fmt.Errorf("unpatch hooks: %w", err)
+	}
+
+	fmt.Println("snip uninstalled (antigravity)")
+	return nil
+}

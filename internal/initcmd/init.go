@@ -307,7 +307,9 @@ func Uninstall(agent string) error {
 		return uninstallCopilot()
 	case "grok":
 		return uninstallGrok()
-	case "windsurf", "cline", "gemini", "kilocode", "antigravity":
+	case "antigravity":
+		return uninstallAntigravity()
+	case "windsurf", "cline", "gemini", "kilocode":
 		return uninstallPromptAgent(agent)
 	}
 	return nil
