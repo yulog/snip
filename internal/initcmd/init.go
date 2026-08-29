@@ -170,7 +170,9 @@ func Run(args []string) error {
 			return initPromptAgent(agent, snipBin, filterDir)
 		}
 		return initGrok(snipBin, home, filterDir)
-	case "windsurf", "cline", "gemini", "kilocode", "antigravity":
+	case "antigravity":
+		return initAntigravity(snipBin, filterDir)
+	case "windsurf", "cline", "gemini", "kilocode":
 		return initPromptAgent(agent, snipBin, filterDir)
 	}
 	return nil
