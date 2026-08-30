@@ -17,6 +17,13 @@ func initAntigravity(snipBin, filterDir string) error {
 		return fmt.Errorf("get home dir: %w", err)
 	}
 
+	// Migrate: remove old hook prompt if present
+	if _, err := os.Stat(filepath.Join(".", promptAgentFiles["antigravity"])); err == nil {
+		if err := removePromptAgent("antigravity"); err == nil {
+			fmt.Printf("  migrated: removed old %s\n", promptAgentFiles["antigravity"])
+		}
+	}
+
 	hookCommand := hook.QuoteBinFor(snipBin, runtime.GOOS) + " hook antigravity"
 	hooksPath := filepath.Join(agyBase, "config", "hooks.json")
 	if err := patchAntigravityHooks(hooksPath, hookCommand); err != nil {

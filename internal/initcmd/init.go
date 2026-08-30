@@ -35,7 +35,7 @@ var promptAgentFiles = map[string]string{
 	"copilot":     filepath.Join(".github", "copilot-instructions.md"),
 	"gemini":      "GEMINI.md",
 	"kilocode":    filepath.Join(".kilocode", "rules", "snip-rules.md"),
-	"antigravity": filepath.Join(".agents", "rules", "snip-rules.md"),
+	"antigravity": filepath.Join(".agents", "rules", "snip-rules.md"), // using migration
 }
 
 // promptFileShared reports whether more than one agent writes filename. Shared
@@ -356,6 +356,16 @@ func uninstallCursor() error {
 // uninstallPromptAgent removes the prompt-injection file for the given agent.
 // For agents with subdirectory paths, it also removes empty parent directories.
 func uninstallPromptAgent(agent string) error {
+	removePromptAgent(agent)
+
+	fmt.Printf("snip uninstalled (%s)\n", agent)
+	return nil
+}
+
+// removePromptAgent removes the prompt-injection file for the given agent.
+// For agents with subdirectory paths, it also removes empty parent directories.
+// Using uninstall prompt agent and migrate old hook prompt
+func removePromptAgent(agent string) error {
 	filename := promptAgentFiles[agent]
 	targetPath := filepath.Join(".", filename)
 
@@ -370,7 +380,6 @@ func uninstallPromptAgent(agent string) error {
 		}
 	}
 
-	fmt.Printf("snip uninstalled (%s)\n", agent)
 	return nil
 }
 
