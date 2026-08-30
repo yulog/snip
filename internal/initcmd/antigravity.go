@@ -78,8 +78,7 @@ func patchAntigravityHooks(path, hookCommand string) error {
 	// Check if snip hook already exists (idempotent)
 	found := false
 	for i, entry := range preToolUse {
-		// TODO: Windows .exe support
-		if isSnipEntry(entry) {
+		if isSnipHookEntry(entry, []string{hookIdentifier, hookIdentifierWindows}) {
 			preToolUse[i] = snipMatcher // Update in place
 			found = true
 			break
@@ -134,8 +133,7 @@ func unpatchAntigravityHooks(path string) error {
 	// Remove snip entries
 	var filtered []any
 	for _, entry := range arr {
-		// TODO: Windows .exe support
-		if !isSnipEntry(entry) {
+		if !isSnipHookEntry(entry, []string{hookIdentifier, hookIdentifierWindows}) {
 			filtered = append(filtered, entry)
 		}
 	}

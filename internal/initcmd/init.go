@@ -13,6 +13,8 @@ import (
 const (
 	// hookIdentifier is used to detect snip entries in settings/hooks JSON.
 	hookIdentifier = "snip hook"
+	// hookIdentifierWindows is used to detect snip entries in settings/hooks JSON for Windows.
+	hookIdentifierWindows = "snip.exe hook"
 	// legacyHookFile is the old bash hook script filename (for migration).
 	legacyHookFile = "snip-rewrite.sh"
 )
@@ -551,6 +553,34 @@ func isSnipCursorEntry(entry any) bool {
 		cmd, _ := hm["command"].(string)
 		if strings.Contains(cmd, hookIdentifier) {
 			return true
+		}
+	}
+	return false
+}
+
+func isSnipHookEntry(entry any, identifierArr []string) bool {
+	m, ok := entry.(map[string]any)
+	if !ok {
+		return false
+	}
+	hooksRaw, ok := m["hooks"]
+	if !ok {
+		return false
+	}
+	hooksArr, ok := hooksRaw.([]any)
+	if !ok {
+		return false
+	}
+	for _, h := range hooksArr {
+		hm, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+		cmd, _ := hm["command"].(string)
+		for _, v := range identifierArr {
+			if strings.Contains(cmd, v) {
+				return true
+			}
 		}
 	}
 	return false
