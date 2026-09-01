@@ -356,7 +356,10 @@ func uninstallCursor() error {
 // uninstallPromptAgent removes the prompt-injection file for the given agent.
 // For agents with subdirectory paths, it also removes empty parent directories.
 func uninstallPromptAgent(agent string) error {
-	removePromptAgent(agent)
+	err := removePromptAgent(agent)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("snip uninstalled (%s)\n", agent)
 	return nil
