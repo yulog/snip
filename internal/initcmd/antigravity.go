@@ -150,7 +150,6 @@ func unpatchAntigravityHooks(path string) error {
 	} else {
 		snipHooks["PreToolUse"] = filtered
 	}
-	// TODO: Remove snip-hooks section
 	if len(snipHooks) == 0 {
 		delete(settings, "snip-hooks")
 	}
