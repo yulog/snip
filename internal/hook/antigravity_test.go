@@ -99,7 +99,7 @@ func antigravityPermissionDecisionOf(t *testing.T, output string) string {
 // TestRunAntigravityMultiSegment verifies that a compound command whose every segment is a
 // supported base command has each segment rewritten.
 // snip vouches for the whole line, so it is safe to skip the prompt (issue #88).
-// Antigravity respects the "Always Allow" cache.
+// Antigravity asks the user for permission and respects the 'Always Allow' cache.
 func TestRunAntigravityMultiSegment(t *testing.T) {
 	commands := []string{"git"}
 	snipBin := "/usr/local/bin/snip"
