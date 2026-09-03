@@ -589,6 +589,7 @@ func isSnipHookEntry(entry any, identifierArr []string) bool {
 			continue
 		}
 		cmd, _ := hm["command"].(string)
+		cmd = strings.NewReplacer("\"", "", "'", "").Replace(cmd)
 		for _, v := range identifierArr {
 			if strings.Contains(cmd, v) {
 				return true
