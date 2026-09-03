@@ -83,6 +83,8 @@ func RunAntigravity(r io.Reader, w io.Writer, commands []string, prefixes []Tran
 		return nil
 	}
 
+	// Please refer to the documentation included with Antigravity for the output format.
+	// ~./gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md
 	overwriteInput := map[string]any{
 		"CommandLine": res.Command,
 	}
@@ -91,7 +93,6 @@ func RunAntigravity(r io.Reader, w io.Writer, commands []string, prefixes []Tran
 		"overwrite": overwriteInput,
 	}
 	// Prompt the user for permission (respects "Always Allow" cache).
-	// (see ~./gemini/antigravity/builtin/skills/agy-customizations/docs/hooks.md)
 	if res.AllKnown {
 		hookOutput["decision"] = "ask"
 		hookOutput["reason"] = "snip auto-rewrite"
